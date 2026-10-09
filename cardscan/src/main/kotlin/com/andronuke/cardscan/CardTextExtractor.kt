@@ -31,7 +31,7 @@ internal object CardTextExtractor {
 
     private data class ExpiryHit(val value: String, val distance: Int, val labelled: Boolean)
 
-    fun extract(lines: List<Line>, currentYear: Int, currentMonth: Int): Scan {
+    fun extract(lines: List<Line>, currentYear: Int, currentMonth: Int, options: ValidationOptions = ValidationOptions()): Scan {
         var number: String? = null
         var detectedNumber: String? = null
         var numberTop = 0
@@ -49,7 +49,7 @@ internal object CardTextExtractor {
                     invalidNumber = true
                     continue
                 }
-                if (!supportedNetwork(digits)) {
+                if ((!supportedNetwork(digits) || cardBrand(digits) !in options.supportedBrands)) {
                     unsupported = true
                     continue
                 }
@@ -66,18 +66,18 @@ internal object CardTextExtractor {
         val detectedExpiry = arrayOfNulls<String>(1)
         var expiryIssue = EXPIRY_OK
         for (line in numberLines) {
-            val labelled = Regex("EXP|VALID|THRU|GOOD").containsMatchIn(line.text.uppercase(Locale.ROOT))
+            val labelled = options.expiryLabels.any { line.text.contains(it, ignoreCase = true) }
             val distance = if (number == null) 0 else abs(line.top - numberTop)
-            expiryIssue = maxOf(expiryIssue, addDates(dates, expiryPattern.matcher(line.text),
-                currentYear, currentMonth, distance, labelled, detectedExpiry))
+            if (ExpiryFormat.SEPARATED in options.expiryFormats) expiryIssue = maxOf(expiryIssue, addDates(dates, expiryPattern.matcher(line.text),
+                currentYear, currentMonth, distance, labelled, detectedExpiry, options))
             val onlyDigits = line.text.replace(Regex("[^0-9]"), "")
-            if (labelled || onlyDigits.length <= 6) {
+            if (ExpiryFormat.SPACED in options.expiryFormats && (labelled || onlyDigits.length <= 6)) {
                 expiryIssue = maxOf(expiryIssue, addDates(dates, spacedExpiryPattern.matcher(line.text),
-                    currentYear, currentMonth, distance, labelled, detectedExpiry))
+                    currentYear, currentMonth, distance, labelled, detectedExpiry, options))
             }
-            if (labelled) {
+            if (ExpiryFormat.LABELLED_COMPACT in options.expiryFormats && labelled) {
                 expiryIssue = maxOf(expiryIssue, addDates(dates, compactExpiryPattern.matcher(line.text),
-                    currentYear, currentMonth, distance, true, detectedExpiry))
+                    currentYear, currentMonth, distance, true, detectedExpiry, options))
             }
         }
         // A printed expiry label is stronger evidence than an unlabelled date elsewhere.
@@ -112,7 +112,7 @@ internal object CardTextExtractor {
 
     private fun addDates(
         dates: MutableList<ExpiryHit>, matcher: Matcher, currentYear: Int, currentMonth: Int,
-        distance: Int, labelled: Boolean, detectedExpiry: Array<String?>
+        distance: Int, labelled: Boolean, detectedExpiry: Array<String?>, options: ValidationOptions
     ): Int {
         var issue = EXPIRY_OK
         while (matcher.find()) {
@@ -134,9 +134,9 @@ internal object CardTextExtractor {
             }
             if (year < currentYear || (year == currentYear && month < currentMonth)) {
                 issue = maxOf(issue, EXPIRY_EXPIRED)
-                continue
+                if (options.expiredCardPolicy == ExpiredCardPolicy.REJECT) continue
             }
-            if (year > currentYear + 20) {
+            if (year > currentYear + options.maximumFutureYears) {
                 issue = maxOf(issue, EXPIRY_INVALID)
                 continue
             }

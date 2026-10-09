@@ -1,68 +1,60 @@
 # CardScan for Android
 
-For architecture, integration, scan rules, security boundaries, testing, and next steps, see the [developer guide](docs/DEVELOPER_GUIDE.md).
+On-device card number and expiry scanning using CameraX, bundled Google ML Kit, Kotlin, and Jetpack Compose. Includes a reusable library and a separate demo app with interactive scanner settings. Supports Visa, Mastercard, and Amex; CVV remains manual.
 
-Two-module **Kotlin and Jetpack Compose** Android card-scanning project:
+**Current release: 1.1.0.** See the [configuration guide](docs/CONFIGURATION.md) for all options and migration details, and the [developer guide](docs/DEVELOPER_GUIDE.md) for architecture, integration, and validation.
 
-- `cardscan`: reusable Android Library module, published as an AAR or Maven artifact.
-- `demo`: separate Android application that depends on `cardscan`.
-
-Both modules follow MVVM: Compose screens render immutable `StateFlow` UI state and send typed events to their ViewModels. Activities handle Android camera, permission, and navigation APIs, then consume one-time effects such as scanner launch and scan completion. See the developer guide for the event/state flow.
-
-The project uses Google's AndroidX CameraX and bundled ML Kit Latin text recognition model. Both screens and all project source/tests are Kotlin; the live CameraX `PreviewView` is hosted in Compose with `AndroidView`. All direct camera, OCR, and UI dependencies are Google-published AndroidX or ML Kit artifacts; their published dependency graphs also include Kotlin and Java support artifacts. The demo scans card numbers and expiry dates on device, then returns editable values to the form. CVV remains manual, and there is no payment submission path.
-
-The demo form and camera overlay provide an add-card flow with a live scanner. The Android system provides the live status bar and keyboard, so their appearance varies by device.
-
-CameraX `PreviewView` center-crops the preview without stretching, so a card keeps its natural proportions. CameraX `MlKitAnalyzer` feeds live frames to ML Kit and maps text bounds to preview coordinates for the card guide. The scanner shows detected digits and expiry on the preview. Invalid or expired expiry text appears in red alongside a red warning, as do number validation failures and unsupported card types. Warnings remain visible briefly so the user can read them; unreadable text gets neutral positioning and lighting guidance. Tapping the preview asks CameraX to focus at that point and briefly shows a focus marker. The Figma flash icon stays visible at the top right; tapping it explains when a device has no flash. The demo then fills the Add card form with the confirmed number and any valid expiry read from the card.
-
-OCR candidates are restricted to the card guide, checked for Luhn validity and Visa, Mastercard and Amex prefixes/lengths, and confirmed across three frames. These are the only card types this sample scanner accepts. Analysis requests a 1280×720 stream so the smaller expiry print has enough pixels when supported by the camera. The sample does not guess missing digits. Expiry must be a valid future date; the scanner accepts common slash, dash, dotted, and spaced formats, including text split into nearby OCR lines. It retains a confirmed number while scanning expiry in later frames, even when OCR stops seeing the number. If expiry remains unreadable after twelve seconds, only the number is returned and the form asks for manual expiry. The production host must replace the sample card-network rules with its actual payment SDK rules.
-
-When glare hides part of a number, the scanner can retain a short OCR fragment and ask the user to tilt the card. It combines two fragments only when each was read in at least two frames, they overlap by six or more digits, and the resulting complete number is unique, passes Luhn, and belongs to a supported card type. Fragments expire after a five-second gap, stay only in memory, and are never returned as an incomplete card number. The user should still review the result on the Add card form; manual entry remains available for cards that cannot be read reliably.
-
-## Install version 1.0.0
-
-The release is published to GitHub Packages. Add the repository to your dependency resolution settings. GitHub requires a username and a classic personal access token with `read:packages`, including for public Maven packages; keep these values outside source control.
+## Install
 
 ```kotlin
-dependencyResolutionManagement {
-    repositories {
-        google()
-        mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/numesh/cardscan-android")
-            credentials {
-                username = providers.gradleProperty("gpr.user").orNull
-                    ?: System.getenv("GITHUB_ACTOR")
-                password = providers.gradleProperty("gpr.key").orNull
-                    ?: System.getenv("GITHUB_TOKEN")
-            }
-        }
+implementation("com.andronuke:cardscan:1.1.0")
+```
+
+Add the GitHub Packages repository to `dependencyResolutionManagement.repositories` alongside `google()` and `mavenCentral()`:
+
+```kotlin
+maven {
+    url = uri("https://maven.pkg.github.com/numesh/cardscan-android")
+    credentials {
+        username = providers.gradleProperty("gpr.user").orNull ?: System.getenv("GITHUB_ACTOR")
+        password = providers.gradleProperty("gpr.key").orNull ?: System.getenv("GITHUB_TOKEN")
     }
 }
 ```
 
+GitHub's Maven registry requires authentication, including for public packages. Use a classic personal access token with `read:packages`. Keep credentials in the user-level `~/.gradle/gradle.properties` or environment, never source control. The release also includes an AAR; use Maven to receive transitive dependencies automatically.
+
+## Launch
+
 ```kotlin
-dependencies {
-    implementation("com.andronuke:cardscan:1.0.0")
-}
+val configuration = CardScannerConfiguration(
+    controls = ScannerControls(torchVisible = true, retryVisible = true),
+    timing = ScannerTiming(expiryWaitTimeoutMs = 15_000)
+)
+launcher.launch(CardScanContract.createIntent(context, configuration))
+// In the Activity Result callback:
+val outcome = CardScanContract.parseOutcome(resultCode, data)
 ```
 
-Set `gpr.user` and `gpr.key` in the user-level `~/.gradle/gradle.properties`, never the project file. You can also download the AAR from the GitHub `v1.0.0` release, but the Maven package is recommended because its POM includes transitive dependencies.
+Existing `createIntent(context)`, `start(activity, requestCode)`, and `parse()` integrations continue to work. Embedded Compose hosts can use `CardScanner` with custom UI slots, progress events, and additional validation.
 
-## Build from source
+## Build and test
 
-Open the root directory in Android Studio and build `:demo:assembleDebug` and `:cardscan:assembleRelease` with Android SDK 36 installed. For a private Nexus Maven repository, set `NEXUS_URL`, `NEXUS_USERNAME`, and `NEXUS_PASSWORD`, then run `:cardscan:publishReleasePublicationToNexusRepository`. No repository credentials are stored here.
+Use JDK 21, Android SDK 36, and the checked-in Gradle wrapper. Minimum supported Android version is API 23.
 
-## Security boundary
+```sh
+./gradlew :cardscan:testDebugUnitTest :cardscan:assembleRelease :demo:assembleDebug
+./gradlew :cardscan:assembleDebugAndroidTest :demo:assembleDebugAndroidTest
+```
 
-- Use synthetic test cards for evaluation; the demo has no payment submission path.
-- Camera frames and OCR output are processed in memory. The app does not save or log them.
-- The camera preview and demo screen use `FLAG_SECURE`.
-- The demo disables Android backup and cleartext traffic.
-- Camera permission is requested at runtime. Denial leaves manual entry available.
-- Google's ML Kit model is bundled for offline first-use recognition. Review ML Kit's terms and metrics disclosures before production use.
-- This sample has not undergone a penetration test or PCI assessment. Production integration must be reviewed against the payment SDK's protected-field and tokenization requirements.
+Instrumentation APKs contain a bundled OCR smoke test and demo result tests. Real camera, focus, torch, rotation, glare, and recognition accuracy still require device evaluation. Unit tests cover configuration and scan-policy combinations independently of camera callbacks.
 
-## Library API
+## Data handling
 
-The Kotlin demo launches `CardScanContract.createIntent(context)` with the Activity Result API and parses the outcome using `CardScanContract.parse(resultCode, data)`. The older `CardScanContract.start(activity, requestCode)` entry point remains available to existing hosts. The result contains a number and, when reliably read, an expiry. The host should show both values for review and use its existing protected payment flow only after the user explicitly submits.
+Frames and card values remain in memory. The library Activity applies `FLAG_SECURE`; embedded hosts must apply that flag to their own window. The demo disables backup and cleartext traffic. Preview masking is configurable; returned card values remain complete. No option enables CVV scanning, frame storage, card logging, or payment submission. Review ML Kit metrics disclosures and the consuming app's tokenization, accessibility, logging, and retention before production use. This project does not claim zero vulnerabilities or PCI certification.
+
+## Publishing
+
+Tags use `vMAJOR.MINOR.PATCH`. Release CI tests, builds, publishes `com.andronuke:cardscan`, and attaches the AAR. To publish to Nexus, set `NEXUS_URL`, `NEXUS_USERNAME`, `NEXUS_PASSWORD` and run `:cardscan:publishReleasePublicationToNexusRepository`.
+
+MIT licensed. The iOS companion is [cardscan-ios](https://github.com/numesh/cardscan-ios).

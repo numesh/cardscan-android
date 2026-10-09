@@ -19,4 +19,4 @@ jobs:
           java-version: "21"
           cache: gradle
       - name: Build library, demo, and test APKs
-        run: ./gradlew :cardscan:assembleRelease :cardscan:assembleDebugAndroidTest :demo:assembleDebug :demo:assembleDebugAndroidTest --no-daemon
+        run: ./gradlew :cardscan:testDebugUnitTest :cardscan:assembleRelease :cardscan:assembleDebugAndroidTest :demo:assembleDebug :demo:assembleDebugAndroidTest --no-daemon

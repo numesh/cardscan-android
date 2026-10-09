@@ -65,6 +65,8 @@ internal fun AddCardScreen(state: AddCardUiState, onEvent: (AddCardEvent) -> Uni
                 BackIcon()
             }
             Text("Add card", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+            Spacer(Modifier.weight(1f))
+            androidx.compose.material3.TextButton(onClick = { onEvent(AddCardEvent.ShowSettings(true)) }) { Text("Settings") }
         }
 
         Column(
@@ -73,7 +75,7 @@ internal fun AddCardScreen(state: AddCardUiState, onEvent: (AddCardEvent) -> Uni
                 .padding(top = if (scanned) 8.dp else 24.dp)
         ) {
             if (scanned) {
-                ScanSuccessBanner(state.scanNote.orEmpty())
+                ScanSuccessBanner(state.scanNote.orEmpty(), state.scanWarning)
                 Spacer(Modifier.height(22.dp))
             }
 
@@ -147,19 +149,19 @@ internal fun AddCardScreen(state: AddCardUiState, onEvent: (AddCardEvent) -> Uni
 }
 
 @Composable
-private fun ScanSuccessBanner(note: String) {
+private fun ScanSuccessBanner(note: String, warning: Boolean) {
     Row(
         Modifier.fillMaxWidth().height(66.dp)
-            .background(Color(0xFFE2F8E9), fieldShape).padding(horizontal = 14.dp),
+            .background(if (warning) Color(0xFFFFE4E4) else Color(0xFFE2F8E9), fieldShape).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(30.dp).background(Color(0xFF08A83B), CircleShape),
+        Box(Modifier.size(30.dp).background(if (warning) Color(0xFFAE2525) else Color(0xFF08A83B), CircleShape),
             contentAlignment = Alignment.Center) {
-            Text("✓", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(if (warning) "!" else "✓", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(12.dp))
         Column {
-            Text(if (note.startsWith("Card details")) "Card details scanned" else "Card number scanned",
+            Text(if (warning) "Expired card — review details" else if (note.startsWith("Card details")) "Card details scanned" else "Card number scanned",
                 color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text("Check your details before continuing.", color = labelColor, fontSize = 13.sp)
         }

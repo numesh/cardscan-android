@@ -22,7 +22,7 @@ jobs:
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew :cardscan:assembleRelease :cardscan:publishReleasePublicationToGitHubPackagesRepository --no-daemon
+        run: ./gradlew :cardscan:testDebugUnitTest :cardscan:assembleRelease :cardscan:publishReleasePublicationToGitHubPackagesRepository --no-daemon
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

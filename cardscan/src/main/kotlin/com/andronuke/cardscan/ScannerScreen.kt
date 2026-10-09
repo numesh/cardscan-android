@@ -1,290 +1,133 @@
 package com.andronuke.cardscan
 
+import android.graphics.RectF
 import android.view.MotionEvent
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size as ComposeSize
-import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 
-/** Compose view: renders scanner state and forwards user input as events. */
+/** Optional replacements receive state and typed actions; camera ownership stays with the library. */
+class ScannerSlots(
+    val header: (@Composable (ScannerUiState, (ScannerAction) -> Unit) -> Unit)? = null,
+    val controls: (@Composable (ScannerUiState, (ScannerAction) -> Unit) -> Unit)? = null,
+    val status: (@Composable (ScannerUiState) -> Unit)? = null,
+    val detectedValues: (@Composable (ScannerUiState) -> Unit)? = null
+)
+internal fun scannerGuide(width: Float, height: Float, density: Float, style: ScannerAppearance): RectF {
+    val w = minOf(width * style.guideWidthFraction, (height * 0.40f) * style.guideAspectRatio).coerceAtLeast(0f)
+    val h = w / style.guideAspectRatio
+    val top = minOf(height * style.guideVerticalPosition, (height - h).coerceAtLeast(0f))
+    return RectF((width-w)/2, top, (width+w)/2, top+h)
+}
+
 @Composable
-internal fun ScannerScreen(
-    state: ScannerUiState,
-    onEvent: (ScannerEvent) -> Unit,
-    onPreviewReady: (PreviewView) -> Unit
-) {
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black)
-            .statusBarsPadding().navigationBarsPadding()
-    ) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val guideWidth = maxWidth - 48.dp
-            // This 1.5:1 guide leaves room for a physical card and its printed expiry.
-            val guideHeight = guideWidth * 0.67f
-            val guideTop = minOf(maxHeight * 0.25f, maxHeight - guideHeight - 280.dp)
-                .coerceAtLeast(0.dp)
-
-        // CameraX needs a real PreviewView for the stream and its built-in tap-to-focus.
-        AndroidView(
-                factory = { context ->
-                    PreviewView(context).apply {
-                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
-                        @Suppress("ClickableViewAccessibility")
-                        setOnTouchListener { view, event ->
-                            if (event.actionMasked == MotionEvent.ACTION_UP) {
-                                val point = ScanPoint(event.x, event.y)
-                                onEvent(ScannerEvent.FocusTapped(point))
-                                view.postDelayed({ onEvent(ScannerEvent.FocusCleared(point)) }, 900)
-                                view.performClick()
-                            }
-                            false // PreviewView lets CameraX handle tap-to-focus.
-                        }
-                        onPreviewReady(this)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-
-            GuideShade(guideTop, guideWidth, guideHeight)
-            GuideCorners(guideTop, guideWidth, guideHeight)
-            FocusMarker(state.focusPoint)
-
-            Box(Modifier.fillMaxWidth().height(52.dp)) {
-                Row(Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(48.dp).clickable { onEvent(ScannerEvent.ClosePressed) }
-                        .semantics { contentDescription = "Close scanner" },
-                        contentAlignment = Alignment.Center) {
-                        CloseIcon()
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    Text("Scan card", color = Color.White, fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold)
+internal fun ScannerScreen(state: ScannerUiState, config: CardScannerConfiguration,
+    action: (ScannerAction) -> Unit, onPreview: (PreviewView) -> Unit, focus: (ScanPoint) -> Unit,
+    slots: ScannerSlots, modifier: Modifier = Modifier) {
+    val a = config.appearance
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier.fillMaxSize().background(Color(a.backgroundColor)).statusBarsPadding().navigationBarsPadding()) {
+        val guide = scannerGuide(maxWidth.value, maxHeight.value, 1f, a)
+        AndroidView(factory = { context -> PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            @Suppress("ClickableViewAccessibility")
+            setOnTouchListener { view, event ->
+                if (event.actionMasked == MotionEvent.ACTION_UP && config.controls.tapToFocusEnabled) {
+                    focus(ScanPoint(event.x, event.y)); view.performClick()
+                }
+                false
+            }
+            onPreview(this)
+        } }, modifier = Modifier.fillMaxSize())
+        Canvas(Modifier.fillMaxSize()) {
+            val rect = scannerGuide(size.width, size.height, density.density, a)
+            val shade = Color(a.backgroundColor).copy(alpha = a.shadeOpacity)
+            drawRect(shade, size = Size(size.width, rect.top))
+            drawRect(shade, topLeft = Offset(0f,rect.bottom), size = Size(size.width,(size.height-rect.bottom).coerceAtLeast(0f)))
+            drawRect(shade, topLeft = Offset(0f,rect.top), size = Size(rect.left,rect.height()))
+            drawRect(shade, topLeft = Offset(rect.right,rect.top), size = Size((size.width-rect.right).coerceAtLeast(0f),rect.height()))
+            if (a.guideVisible && a.guideStyle == GuideStyle.CORNERS) {
+                val segment = minOf(28.dp.toPx(), rect.width()/4, rect.height()/4)
+                listOf(Offset(rect.left,rect.top) to Offset(1f,1f), Offset(rect.right,rect.top) to Offset(-1f,1f),
+                    Offset(rect.left,rect.bottom) to Offset(1f,-1f), Offset(rect.right,rect.bottom) to Offset(-1f,-1f)).forEach { (corner,direction) ->
+                    drawLine(Color(a.guideColor),corner,corner+Offset(segment*direction.x,0f),a.guideStrokeDp.dp.toPx())
+                    drawLine(Color(a.guideColor),corner,corner+Offset(0f,segment*direction.y),a.guideStrokeDp.dp.toPx())
                 }
             }
-
-            Text("Position your card number and expiry date\ninside the frame.",
-                color = Color.White, fontSize = 15.sp, lineHeight = 22.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 70.dp, start = 16.dp, end = 16.dp))
-
-            state.numberPreview?.let { digits ->
-                ScanChip(
-                    text = digits,
-                    modifier = Modifier.offset(y = guideTop + guideHeight - 102.dp)
-                        .fillMaxWidth().padding(horizontal = 40.dp).height(44.dp),
-                    fontSize = 17
-                )
+            if (a.guideVisible && a.guideStyle == GuideStyle.OUTLINE) drawRoundRect(Color(a.guideColor), Offset(rect.left,rect.top),Size(rect.width(),rect.height()),
+                androidx.compose.ui.geometry.CornerRadius(a.cornerRadiusDp.dp.toPx()), style = Stroke(a.guideStrokeDp.dp.toPx()))
+            if (config.controls.focusMarkerVisible) state.focusPoint?.let { drawCircle(Color(a.focusColor), 24.dp.toPx(),Offset(it.x,it.y),style=Stroke(2.dp.toPx())) }
+        }
+        Column(Modifier.fillMaxWidth().padding(a.spacingDp.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (slots.header != null) slots.header.invoke(state,action) else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (config.controls.closeVisible) ScannerButton(config.text(ScannerMessage.CLOSE), a.closeIcon, "×", config) { action(ScannerAction.CLOSE) }
+                    Text(config.text(ScannerMessage.TITLE), color=Color(a.textColor),fontSize=a.titleSizeSp.sp)
+                }
+                Text(config.text(ScannerMessage.INSTRUCTIONS),color=Color(a.textColor),fontSize=a.bodySizeSp.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
             }
-            state.expiryPreview?.let { expiry ->
-                ScanChip(
-                    text = "EXP $expiry",
-                    modifier = Modifier.offset(x = 40.dp, y = guideTop + guideHeight - 52.dp)
-                        .size(width = 120.dp, height = 40.dp),
-                    fontSize = 16,
-                    red = state.expiryPreviewInvalid
-                )
+            if (config.controls.placement == ControlPlacement.TOP) Controls(state,config,action,slots)
+        }
+        Column(Modifier.offset(y=(guide.bottom - 104).coerceAtLeast(guide.top).dp).fillMaxWidth().padding(a.spacingDp.dp), verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            if (slots.detectedValues != null) slots.detectedValues.invoke(state) else {
+                state.numberPreview?.let { PreviewChip(it,config,false) }
+                if (a.expiryPreviewVisible) state.expiryPreview?.let { PreviewChip(config.text(ScannerMessage.EXPIRY_PREFIX)+" "+it,config,state.expiryPreviewInvalid) }
             }
-
-            Text(
-                state.status,
-                color = Color.White,
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.offset(y = guideTop + guideHeight + 10.dp)
-                    .fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (state.warningVisible) Color(0xFFAE2525) else Color.Transparent)
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            )
-
-            // Flash has its own prominent control below the live card preview.
-            Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 128.dp)
-                    .size(72.dp).clip(CircleShape)
-                    .background(Color.White.copy(alpha = if (state.torchEnabled) 0.27f else 0.13f))
-                    .border(2.dp, Color.White.copy(alpha = 0.45f), CircleShape)
-                    .clickable { onEvent(ScannerEvent.TorchPressed) }
-                    .semantics { contentDescription = if (state.torchEnabled) "Turn torch off" else "Turn torch on" },
-                contentAlignment = Alignment.Center
-            ) { FlashlightIcon() }
-
-            Box(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 64.dp)
-                    .fillMaxWidth().height(52.dp).clip(RoundedCornerShape(50))
-                    .border(2.dp, Color.White, RoundedCornerShape(50))
-                    .clickable { onEvent(ScannerEvent.ClosePressed) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Enter details manually", color = Color.White,
-                    fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                PrivacyShield()
-                Spacer(Modifier.width(7.dp))
-                Text("Your card image is not saved.", color = Color(0xFFDEE2E8), fontSize = 12.sp)
+        }
+        Box(Modifier.offset(y=guide.bottom.dp).fillMaxWidth().padding(a.spacingDp.dp)) {
+            if (slots.status != null) slots.status.invoke(state) else Text(config.text(state.message), color=Color(a.textColor),fontSize=a.bodySizeSp.sp,textAlign=TextAlign.Center,
+                modifier=Modifier.fillMaxWidth().clip(RoundedCornerShape(a.cornerRadiusDp.dp)).background(Color(if(state.warningVisible) a.warningColor else if(state.message==ScannerMessage.SUCCESS) a.successColor else a.backgroundColor)).padding(8.dp)
+                    .semantics { if(a.announceStatus) liveRegion=LiveRegionMode.Polite })
+        }
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(a.spacingDp.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            if (config.controls.placement == ControlPlacement.BOTTOM) Controls(state,config,action,slots)
+            if (state.readyToConfirm) ScannerButton(config.text(ScannerMessage.CONFIRM),0,null,config) { action(ScannerAction.CONFIRM) }
+            if (config.controls.manualEntryVisible) ScannerButton(config.text(ScannerMessage.MANUAL),a.manualIcon,null,config) { action(ScannerAction.MANUAL_ENTRY) }
+            if(a.privacyVisible) Row(verticalAlignment=Alignment.CenterVertically) {
+                Icon(painterResource(a.privacyIcon.takeIf { it!=0 } ?: R.drawable.ic_privacy),null,tint=Color(a.textColor),modifier=Modifier.size(18.dp))
+                Text(config.text(ScannerMessage.PRIVACY),color=Color(a.textColor),fontSize=12.sp)
             }
         }
     }
 }
-
-@Composable
-private fun GuideShade(top: Dp, width: Dp, height: Dp) {
-    val density = LocalDensity.current
-    // Offscreen compositing lets the clear rounded rectangle reveal the camera preview.
-    Canvas(Modifier.fillMaxSize().graphicsLayer {
-        compositingStrategy = CompositingStrategy.Offscreen
-    }) {
-        drawRect(Color.Black.copy(alpha = 0.67f))
-        val left = with(density) { 24.dp.toPx() }
-        val y = with(density) { top.toPx() }
-        val w = with(density) { width.toPx() }
-        val h = with(density) { height.toPx() }
-        drawRoundRect(Color.Transparent, topLeft = Offset(left, y),
-            size = ComposeSize(w, h), cornerRadius = CornerRadius(with(density) { 16.dp.toPx() }),
-            blendMode = BlendMode.Clear)
-        // The reference has a bounded camera band. Keep controls on solid black.
-        drawRect(Color.Black, size = ComposeSize(size.width, (y - 28.dp.toPx()).coerceAtLeast(0f)))
-        val previewBottom = y + h + 60.dp.toPx()
-        if (previewBottom < size.height) {
-            drawRect(Color.Black, topLeft = Offset(0f, previewBottom),
-                size = ComposeSize(size.width, size.height - previewBottom))
+@Composable private fun Controls(state:ScannerUiState,c:CardScannerConfiguration,action:(ScannerAction)->Unit,slots:ScannerSlots) {
+    if(slots.controls!=null) { slots.controls.invoke(state,action); return }
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.Center,verticalAlignment=Alignment.CenterVertically) {
+        if(c.controls.torchVisible && (!c.controls.hideTorchWhenUnavailable || state.torchAvailable)) ScannerButton(
+            c.text(if(state.torchEnabled) ScannerMessage.TORCH_OFF else ScannerMessage.TORCH_ON),
+            if(state.torchEnabled) c.appearance.torchOnIcon.takeIf { it!=0 } ?: R.drawable.ic_flashlight else c.appearance.torchOffIcon.takeIf { it!=0 } ?: R.drawable.ic_flashlight,null,c,true) { action(ScannerAction.TOGGLE_TORCH) }
+        if(c.controls.retryVisible) ScannerButton(c.text(ScannerMessage.RETRY),0,null,c) { action(ScannerAction.RETRY) }
+        if(c.controls.zoomVisible) {
+            ScannerButton(c.text(ScannerMessage.ZOOM_OUT),0,"−",c) { action(ScannerAction.ZOOM_OUT) }
+            ScannerButton(c.text(ScannerMessage.ZOOM_IN),0,"+",c) { action(ScannerAction.ZOOM_IN) }
         }
     }
 }
-
-/** Four short brackets stay visible even when the camera points at a dark card. */
-@Composable
-private fun GuideCorners(top: Dp, width: Dp, height: Dp) {
-    Canvas(Modifier.fillMaxSize()) {
-        val left = 24.dp.toPx()
-        val right = left + width.toPx()
-        val upper = top.toPx()
-        val lower = upper + height.toPx()
-        val segment = 28.dp.toPx()
-        val stroke = 3.dp.toPx()
-        val color = Color(0xFFFFD522)
-        listOf(
-            Offset(left + segment, upper) to Offset(left, upper),
-            Offset(left, upper) to Offset(left, upper + segment),
-            Offset(right - segment, upper) to Offset(right, upper),
-            Offset(right, upper) to Offset(right, upper + segment),
-            Offset(left + segment, lower) to Offset(left, lower),
-            Offset(left, lower) to Offset(left, lower - segment),
-            Offset(right - segment, lower) to Offset(right, lower),
-            Offset(right, lower) to Offset(right, lower - segment)
-        ).forEach { (start, end) -> drawLine(color, start, end, strokeWidth = stroke) }
+@Composable private fun ScannerButton(label:String,icon:Int,glyph:String?,c:CardScannerConfiguration,large:Boolean=false,onClick:()->Unit) {
+    val a=c.appearance
+    TextButton(onClick=onClick,modifier=Modifier.defaultMinSize(minWidth=48.dp,minHeight=48.dp).then(if(large) Modifier.size(a.buttonSizeDp.dp) else Modifier)
+        .semantics { contentDescription=label }, colors=ButtonDefaults.textButtonColors(contentColor=Color(a.textColor),containerColor=Color(a.buttonColor)),shape=if(large) RoundedCornerShape(50) else RoundedCornerShape(a.cornerRadiusDp.dp)) {
+        if(icon!=0) Icon(painterResource(icon),null,modifier=Modifier.size(a.iconSizeDp.dp))
+        else Text(glyph?:label,fontSize=(if(glyph!=null) a.iconSizeDp else a.buttonSizeSp).sp,textAlign=TextAlign.Center)
     }
 }
-
-@Composable
-private fun CloseIcon() {
-    Canvas(Modifier.size(22.dp)) {
-        val inset = 2.dp.toPx()
-        drawLine(Color.White, Offset(inset, inset), Offset(size.width - inset, size.height - inset),
-            strokeWidth = 2.3.dp.toPx())
-        drawLine(Color.White, Offset(size.width - inset, inset), Offset(inset, size.height - inset),
-            strokeWidth = 2.3.dp.toPx())
-    }
-}
-
-@Composable
-private fun FlashlightIcon() {
-    Canvas(Modifier.size(28.dp)) {
-        val u = size.width / 28f
-        val shape = Path().apply {
-            moveTo(7f * u, 3f * u); lineTo(21f * u, 3f * u)
-            lineTo(21f * u, 9f * u); lineTo(18f * u, 12f * u)
-            lineTo(18f * u, 25f * u); lineTo(10f * u, 25f * u)
-            lineTo(10f * u, 12f * u); lineTo(7f * u, 9f * u); close()
-        }
-        drawPath(shape, Color.White, style = Stroke(width = 2f * u))
-        drawLine(Color.White, Offset(10f * u, 12f * u), Offset(18f * u, 12f * u), 2f * u)
-    }
-}
-
-@Composable
-private fun PrivacyShield() {
-    Canvas(Modifier.size(17.dp, 19.dp)) {
-        val x = size.width / 17f
-        val y = size.height / 19f
-        val shape = Path().apply {
-            moveTo(8.5f * x, 1f * y); lineTo(15f * x, 3f * y)
-            lineTo(14f * x, 12f * y); quadraticTo(12f * x, 16f * y, 8.5f * x, 18f * y)
-            quadraticTo(5f * x, 16f * y, 3f * x, 12f * y)
-            lineTo(2f * x, 3f * y); close()
-        }
-        drawPath(shape, Color(0xFFBEC8D5))
-        drawCircle(Color(0xFF222830), radius = 1.2f * x, center = Offset(8.5f * x, 7f * y))
-        drawLine(Color(0xFF222830), Offset(8.5f * x, 8f * y), Offset(8.5f * x, 12f * y), 1.5f * x)
-    }
-}
-
-@Composable
-private fun FocusMarker(point: ScanPoint?) {
-    Canvas(Modifier.fillMaxSize()) {
-        if (point == null) return@Canvas
-        val radius = 24.dp.toPx()
-        val color = Color(0xFFFFC83D)
-        drawCircle(color, radius, Offset(point.x, point.y), style = Stroke(width = 2.dp.toPx()))
-        drawLine(color, Offset(point.x - 5.dp.toPx(), point.y),
-            Offset(point.x + 5.dp.toPx(), point.y), strokeWidth = 2.dp.toPx())
-        drawLine(color, Offset(point.x, point.y - 5.dp.toPx()),
-            Offset(point.x, point.y + 5.dp.toPx()), strokeWidth = 2.dp.toPx())
-    }
-}
-
-@Composable
-private fun ScanChip(text: String, modifier: Modifier, fontSize: Int, red: Boolean = false) {
-    Box(modifier.clip(RoundedCornerShape(10.dp))
-        .background(if (red) Color(0xFFAE2525) else Color.Black.copy(alpha = 0.85f)),
-        contentAlignment = Alignment.Center) {
-        Text(text, color = Color.White, fontSize = fontSize.sp,
-            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
-            textAlign = TextAlign.Center, maxLines = 1)
-    }
+@Composable private fun PreviewChip(value:String,c:CardScannerConfiguration,invalid:Boolean) {
+    Text(value,color=Color(c.appearance.textColor),fontSize=c.appearance.previewSizeSp.sp,modifier=Modifier
+        .clip(RoundedCornerShape(c.appearance.cornerRadiusDp.dp)).background(Color(if(invalid) c.appearance.warningColor else c.appearance.previewColor)).padding(6.dp))
 }

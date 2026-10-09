@@ -2,7 +2,7 @@ package com.andronuke.cardscan.demo
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.andronuke.cardscan.CardScanResult
+import com.andronuke.cardscan.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,11 +13,14 @@ import kotlinx.coroutines.launch
 
 /** Values rendered by the Add Card screen. Nothing here is written to SavedStateHandle or disk. */
 internal data class AddCardUiState(
+    val configuration: CardScannerConfiguration = CardScannerConfiguration(),
+    val settingsVisible: Boolean = false,
     val cardNumber: String = "",
     val month: String = "",
     val year: String = "",
     val cvv: String = "",
     val nickname: String = "",
+    val scanWarning: Boolean = false,
     val scanNote: String? = null
 )
 
@@ -29,6 +32,8 @@ internal sealed interface AddCardEvent {
     data class CvvChanged(val value: String) : AddCardEvent
     data class NicknameChanged(val value: String) : AddCardEvent
     data class ScanCompleted(val result: CardScanResult?) : AddCardEvent
+    data class Configure(val configuration: CardScannerConfiguration) : AddCardEvent
+    data class ShowSettings(val show: Boolean) : AddCardEvent
     data object ScanRequested : AddCardEvent
     data object BackPressed : AddCardEvent
 }
@@ -48,6 +53,8 @@ internal class DemoViewModel : ViewModel() {
 
     fun onEvent(event: AddCardEvent) {
         when (event) {
+            is AddCardEvent.Configure -> _uiState.update { it.copy(configuration = event.configuration) }
+            is AddCardEvent.ShowSettings -> _uiState.update { it.copy(settingsVisible = event.show) }
             is AddCardEvent.CardNumberChanged -> _uiState.update { it.copy(cardNumber = event.value.take(23)) }
             is AddCardEvent.MonthChanged -> _uiState.update { it.copy(month = event.value.take(2)) }
             is AddCardEvent.YearChanged -> _uiState.update { it.copy(year = event.value.take(2)) }
@@ -64,10 +71,11 @@ internal class DemoViewModel : ViewModel() {
         val expiry = result.expiry?.takeIf { it.matches(Regex("[0-9]{2}/[0-9]{2}")) }
         _uiState.update { current ->
             current.copy(
+                scanWarning = result.validationStatus == CardValidationStatus.EXPIRED_REQUIRES_REVIEW,
                 cardNumber = formatNumber(result.cardNumber),
                 month = expiry?.substring(0, 2).orEmpty(),
                 year = expiry?.substring(3, 5).orEmpty(),
-                scanNote = if (expiry == null) "Card number scanned. Enter the expiry date manually."
+                scanNote = if (result.validationStatus == CardValidationStatus.EXPIRED_REQUIRES_REVIEW) "Scanned card is expired. Correct the details before continuing." else if (expiry == null) "Card number scanned. Enter the expiry date manually."
                     else "Card details scanned. Check them before continuing."
             )
         }

@@ -12,6 +12,7 @@ android {
     compileSdk = 36
     defaultConfig {
         minSdk = 23
+        testApplicationId = "com.andronuke.cardscan.library.test"
         targetSdk = 35
         testInstrumentationRunner = "com.andronuke.cardscan.ScannerPipelineInstrumentation"
     }
@@ -21,7 +22,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    publishing { singleVariant("release") }
+    publishing { singleVariant("release") { withSourcesJar() } }
 }
 
 dependencies {
@@ -32,6 +33,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
+    testImplementation("junit:junit:4.13.2")
 
     // Google's bundled, on-device Latin OCR model; no first-use model download.
     implementation("com.google.mlkit:text-recognition:16.0.1")
@@ -50,7 +53,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.andronuke"
                 artifactId = "cardscan"
-                version = "1.0.0"
+                version = "1.1.0"
                 pom {
                     name.set("CardScan for Android")
                     description.set("On-device Visa, Mastercard, and Amex card number and expiry scanner.")

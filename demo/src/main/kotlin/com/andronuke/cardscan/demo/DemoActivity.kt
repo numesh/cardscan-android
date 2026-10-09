@@ -32,12 +32,13 @@ class DemoActivity : ComponentActivity() {
             LaunchedEffect(viewModel) {
                 viewModel.effects.collect { effect ->
                     when (effect) {
-                        AddCardEffect.LaunchScanner -> scanLauncher.launch(CardScanContract.createIntent(this@DemoActivity))
+                        AddCardEffect.LaunchScanner -> scanLauncher.launch(CardScanContract.createIntent(this@DemoActivity, viewModel.uiState.value.configuration))
                         AddCardEffect.Close -> finish()
                     }
                 }
             }
             AddCardScreen(state, viewModel::onEvent)
+            if (state.settingsVisible) ScannerSettings(state.configuration, viewModel::onEvent)
         }
     }
 

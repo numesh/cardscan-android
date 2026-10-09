@@ -138,32 +138,13 @@ class ScannerPipelineInstrumentation : Instrumentation() {
     }
 
     private fun checkScannerViewModel(today: Calendar, expiry: String) {
-        val viewModel = ScannerViewModel()
-        val lines = listOf(
-            CardTextExtractor.Line("4111 1111 1111 1111", 100, 0),
-            CardTextExtractor.Line("VALID THRU $expiry", 400, 0)
-        )
-        val base = 100_000L
-        repeat(3) { index ->
-            runOnMainSync {
-                viewModel.onEvent(ScannerEvent.Frame(lines, base + index * 100,
-                    today.get(Calendar.YEAR), today.get(Calendar.MONTH) + 1))
-            }
-        }
-        val effect = runBlocking { withTimeout(3000) { viewModel.effects.first() } }
-        check(effect == ScannerEffect.Finished("4111111111111111", expiry)) {
-            "scanner ViewModel did not return confirmed number and expiry"
-        }
-        val invalid = ScannerViewModel()
-        runOnMainSync {
-            invalid.onEvent(ScannerEvent.Frame(listOf(
-                CardTextExtractor.Line("4111 1111 1111 1111", 100, 0),
-                CardTextExtractor.Line("EXP 13/29", 400, 0)
-            ), base, today.get(Calendar.YEAR), today.get(Calendar.MONTH) + 1))
-        }
-        check(invalid.uiState.value.warningVisible &&
-            invalid.uiState.value.status.contains("Expiry date is invalid")) {
-            "invalid expiry must be visible as a warning"
-        }
+        val engine = ScanEngine(CardScannerConfiguration())
+        val lines = listOf(CardTextExtractor.Line("4111 1111 1111 1111",100,0), CardTextExtractor.Line("EXP $expiry",400,0))
+        repeat(3) { engine.frame(lines,it*250L,today.get(Calendar.YEAR),today.get(Calendar.MONTH)+1) }
+        val result = (engine.outcome as? ScanOutcome.Completed)?.result
+        check(result?.cardNumber == "4111111111111111" && result.expiry == expiry)
+        val invalid = ScanEngine(CardScannerConfiguration())
+        invalid.frame(listOf(CardTextExtractor.Line("EXP 13/29",400,0)),0,today.get(Calendar.YEAR),today.get(Calendar.MONTH)+1)
+        check(invalid.state.warningVisible && invalid.state.message == ScannerMessage.INVALID_EXPIRY)
     }
 }

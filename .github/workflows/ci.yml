@@ -1,0 +1,22 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Build library, demo, and test APKs
+        run: ./gradlew :cardscan:assembleRelease :cardscan:assembleDebugAndroidTest :demo:assembleDebug :demo:assembleDebugAndroidTest --no-daemon
